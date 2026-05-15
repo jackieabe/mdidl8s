@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本語会話練習ツール（AI解析完全対応版）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fix-webm-duration@1.0.5/fix-webm-duration.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex items-center justify-center p-4">
+
+    <div class="max-w-md w-full bg-white rounded-xl shadow-lg overflow-hidden relative">
+        
+        <div class="bg-indigo-50 p-6 border-b border-indigo-100">
+            <h1 id="round-title" class="text-xl font-bold text-indigo-800">1回目の練習</h1>
+            <p id="round-desc" class="text-sm text-indigo-600 mt-1">順番通り（すべて表示）</p>
+            <div class="mt-4 h-2 bg-indigo-200 rounded-full overflow-hidden">
+                <div id="progress" class="h-full bg-indigo-500 transition-all duration-300" style="width: 0%;"></div>
+            </div>
+            <div id="recording-status" class="hidden mt-3 text-xs font-bold text-rose-500 flex items-center">
+                <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse mr-2"></span>
+                録音中（AI解析用メタデータ付与有効）
+            </div>
+        </div>
+
+        <div class="p-8 text-center min-h-[300px] flex flex-col justify-center items-center">
+            <div id="card-display" class="w-full"></div>
+            <div id="feedback-text" class="mt-6 text-lg font-bold min-h-[1.5rem]"></div>
+        </div>
+
+        <div class="p-6 bg-slate-50 border-t border-slate-100 flex flex-col gap-4">
+            <div id="start-record-container" class="flex justify-center">
+                <button id="start-rec-btn" class="w-full py-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-lg shadow-lg transition-all active:scale-95">
+                    🎤 マイクを許可して練習開始
+                </button>
+            </div>
+
+            <div id="pronunciation-area" class="hidden flex-col gap-3">
+                <button id="speech-btn" class="w-full py-3 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <span class="text-xl">🎤</span> 発音をチェック
+                </button>
+                <button id="next-btn" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors">
+                    次へ
+                </button>
+            </div>
+        </div>
+
+        <div id="finish-screen" class="hidden absolute inset-0 bg-white flex flex-col items-center justify-center p-6 text-center z-20">
+            <div class="text-6xl mb-4">🎉</div>
+            <h2 class="text-2xl font-bold text-slate-800 mb-2">お疲れ様でした！</h2>
+            <p id="score-display" class="text-lg text-slate-600 mb-6">正解数: 0 / 0</p>
+            
+            <div class="flex flex-col gap-3 w-full">
+                <button id="download-btn" class="hidden w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow">
+                    💾 AI解析用音声を保存
+                </button>
+                <button id="save-log-btn" class="w-full py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg">
+                    📄 練習ログを保存 (Gemini用)
+                </button>
+            </div>
+            <p class="text-xs text-slate-400 mt-4">音声とログをGeminiにアップロードして評価を依頼してください。</p>
+        </div>
+    </div>
+
+    <script>
+        // 文章データに変更し、句読点を抜いた一致用テキストを用意
+        const wordData = [
+            { h: "さかな、すきですか。", k: "魚、好きですか。", r: "Sakana, suki desu ka.", zh: "喜歡吃魚嗎？", accepted: ["魚好きですか", "さかなすきですか"] },
+            { h: "いいえ、すきじゃないです。", k: "いいえ、好きじゃないです。", r: "Iie, suki janai desu.", zh: "不，我不喜歡。", accepted: ["いいえ好きじゃないです", "いいえすきじゃないです"] },
+            { h: "にほんのたべもの、なにがすきですか。", k: "日本の食べ物、何が好きですか。", r: "Nihon no tabemono, nani ga suki desu ka.", zh: "喜歡什麼日本食物？", accepted: ["日本の食べ物何が好きですか", "にほんのたべものなにがすきですか"] },
+            { h: "すしがすきです。", k: "寿司が好きです。", r: "Sushi ga suki desu.", zh: "我喜歡壽司。", accepted: ["寿司が好きです", "すしがすきです", "お寿司が好きです"] },
+            { h: "おちゃ、のみますか。", k: "お茶、飲みますか？", r: "Ocha, nomimasu ka.", zh: "要喝茶嗎？", accepted: ["お茶飲みますか", "おちゃのみますか"] },
+            { h: "いえ、けっこうです。", k: "いえ、けっこうです。", r: "Ie, kekkou desu.", zh: "不了，謝謝。", accepted: ["いえけっこうです", "いいえけっこうです"] },
+            { h: "なに、のみますか。", k: "何、飲みますか？", r: "Nani, nomimasu ka.", zh: "喝什麼？", accepted: ["何飲みますか", "なにのみますか"] },
+            { h: "こうちゃ、おねがいします。", k: "紅茶、お願いします。", r: "Koucha, onegaishimasu.", zh: "麻煩給我紅茶。", accepted: ["紅茶お願いします", "こうちゃおねがいします"] },
+            { h: "あさごはん、いつも、なに、たべますか。", k: "朝ご飯、いつも、何、食べますか？", r: "Asagohan, itsumo, nani, tabemasu ka.", zh: "早餐通常吃什麼？", accepted: ["朝ご飯いつも何食べますか", "朝ごはんいつも何食べますか", "あさごはんいつもなにたべますか"] },
+            { h: "あさごはんはあまりたべません。", k: "朝ごはんはあまり食べません。", r: "Asagohan wa amari tabemasen.", zh: "我不常吃早餐。", accepted: ["朝ごはんはあまり食べません", "朝ご飯はあまり食べません", "あさごはんはあまりたべません"] }
+        ];
+
+        let currentRound = 1, currentIndex = 0, currentList = [...wordData], totalCorrect = 0;
+        let isCurrentCardCorrect = false, autoAdvanceTimeout = null;
+        let sessionLogs = []; 
+        let mediaRecorder, audioChunks = [], isRecording = false, startTime, mimeType = 'audio/webm', fileExtension = 'mp4';
+
+        const roundTitle = document.getElementById('round-title'), roundDesc = document.getElementById('round-desc');
+        const cardDisplay = document.getElementById('card-display'), nextBtn = document.getElementById('next-btn');
+        const progress = document.getElementById('progress'), finishScreen = document.getElementById('finish-screen');
+        const recordingStatus = document.getElementById('recording-status'), startRecBtn = document.getElementById('start-rec-btn');
+        const downloadBtn = document.getElementById('download-btn'), speechBtn = document.getElementById('speech-btn');
+        const feedbackText = document.getElementById('feedback-text'), saveLogBtn = document.getElementById('save-log-btn');
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+        // 文字列の類似度（レーベンシュタイン距離）を計算する関数
+        function calculateSimilarity(str1, str2) {
+            const arr1 = Array.from(str1);
+            const arr2 = Array.from(str2);
+            if (arr1.length === 0 && arr2.length === 0) return 1.0;
+            if (arr1.length === 0 || arr2.length === 0) return 0.0;
+            
+            const matrix = Array(arr1.length + 1).fill(null).map(() => Array(arr2.length + 1).fill(null));
+            for (let i = 0; i <= arr1.length; i++) matrix[i][0] = i;
+            for (let j = 0; j <= arr2.length; j++) matrix[0][j] = j;
+            
+            for (let i = 1; i <= arr1.length; i++) {
+                for (let j = 1; j <= arr2.length; j++) {
+                    const indicator = arr1[i - 1] === arr2[j - 1] ? 0 : 1;
+                    matrix[i][j] = Math.min(
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1,
+                        matrix[i - 1][j - 1] + indicator
+                    );
+                }
+            }
+            const maxLength = Math.max(arr1.length, arr2.length);
+            return (maxLength - matrix[arr1.length][arr2.length]) / maxLength;
+        }
+
+        if (recognition) {
+            recognition.lang = 'ja-JP';
+            recognition.interimResults = false;
+            recognition.onstart = () => { 
+                speechBtn.classList.replace('bg-indigo-100', 'bg-indigo-300'); 
+                speechBtn.innerHTML = '👂 聞き取り中...'; 
+            };
+            recognition.onresult = (event) => {
+                let transcript = event.results[0][0].transcript.replace(/[。、！？\s]/g, '');
+                const currentWord = currentList[currentIndex];
+                
+                let isExactMatch = currentWord.accepted.some(word => transcript.includes(word));
+                let maxSimilarity = 0;
+
+                if (isExactMatch) {
+                    maxSimilarity = 1.0;
+                } else {
+                    currentWord.accepted.forEach(word => {
+                        const sim = calculateSimilarity(transcript, word);
+                        if (sim > maxSimilarity) maxSimilarity = sim;
+                    });
+                }
+
+                // 類似度が0.6（60%）以上なら正解とする
+                const isCorrect = maxSimilarity >= 0.6;
+                
+                const currentLog = sessionLogs[sessionLogs.length - 1];
+                currentLog.transcript = transcript;
+                currentLog.status = isCorrect ? "正しい" : "正しくない";
+
+                if (isCorrect) {
+                    if (maxSimilarity >= 1.0) {
+                        feedbackText.innerHTML = `<span class="text-emerald-600">⭕️ 正解！ (${transcript})</span>`;
+                    } else {
+                        feedbackText.innerHTML = `<span class="text-emerald-500">⭕️ Mostly OK! (${transcript})</span>`;
+                    }
+                    
+                    if (!isCurrentCardCorrect) { 
+                        totalCorrect++; 
+                        isCurrentCardCorrect = true; 
+                    }
+                    if (autoAdvanceTimeout) clearTimeout(autoAdvanceTimeout);
+                    autoAdvanceTimeout = setTimeout(goToNextCard, 1500); 
+                } else {
+                    feedbackText.innerHTML = `<span class="text-rose-500">❌ もう少し！ (${transcript})</span>`;
+                }
+            };
+            recognition.onend = () => { 
+                speechBtn.classList.replace('bg-indigo-300', 'bg-indigo-100'); 
+                speechBtn.innerHTML = '🎤 もう一度チェック'; 
+            };
+        }
+
+        async function initRecording() {
+            try {
+                audioChunks = [];
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                if (MediaRecorder.isTypeSupported('audio/mp4')) { mimeType = 'audio/mp4'; } 
+                else { mimeType = 'audio/webm;codecs=opus'; }
+                fileExtension = 'mp4';
+
+                mediaRecorder = new MediaRecorder(stream, { mimeType });
+                mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+                mediaRecorder.onstop = () => {
+                    const duration = Date.now() - startTime;
+                    const blob = new Blob(audioChunks, { type: mimeType });
+                    if (mimeType.includes('webm')) {
+                        ysFixWebmDuration(blob, duration, { logger: false }, (fixedBlob) => {
+                            setupDownload(new Blob([fixedBlob], { type: mimeType }));
+                        });
+                    } else { setupDownload(blob); }
+                };
+
+                startTime = Date.now();
+                mediaRecorder.start(1000); 
+                isRecording = true;
+                recordingStatus.classList.remove('hidden');
+                document.getElementById('start-record-container').classList.add('hidden');
+                document.getElementById('pronunciation-area').classList.replace('hidden', 'flex');
+                updateCard();
+            } catch (err) { alert("マイクの使用を許可してください。"); }
+        }
+
+        function setupDownload(blob) {
+            const url = URL.createObjectURL(blob);
+            downloadBtn.onclick = () => {
+                const a = document.createElement('a');
+                a.href = url; 
+                a.download = `practice_session_${new Date().getTime()}.${fileExtension}`;
+                a.click();
+            };
+            downloadBtn.classList.remove('hidden');
+        }
+
+        function updateCard() {
+            const item = currentList[currentIndex];
+            isCurrentCardCorrect = false; 
+            feedbackText.innerHTML = '';
+            
+            sessionLogs.push({
+                round: currentRound,
+                word: item.k,
+                reading: item.h,
+                status: "話していない",
+                transcript: "-"
+            });
+
+            const roundInfo = [
+                { title: "1回目の練習", desc: "順番通り（すべて表示）" },
+                { title: "2回目の練習", desc: "ランダム（読み・意味）" },
+                { title: "3回目の練習", desc: "ランダム（意味のみ：超難問）" }
+            ];
+            
+            roundTitle.innerText = roundInfo[currentRound - 1].title;
+            roundDesc.innerText = roundInfo[currentRound - 1].desc;
+
+            // 長文に対応できるよう、フォントサイズを text-3xl や text-2xl などに調整
+            const htmls = [
+                `<div><div class="text-indigo-500 text-base mb-1">${item.h}</div><div class="text-3xl font-bold my-2 leading-snug">${item.k}</div><div class="italic text-slate-400 text-sm mb-4">${item.r}</div><div class="text-xl text-emerald-600 font-bold">${item.zh}</div></div>`,
+                `<div><div class="text-3xl font-bold mb-4 leading-snug">${item.h}</div><div class="text-2xl text-emerald-600 font-bold">${item.zh}</div></div>`,
+                `<div class="text-4xl font-bold text-emerald-600 leading-snug">${item.zh}</div>`
+            ];
+            
+            cardDisplay.innerHTML = htmls[currentRound - 1];
+            progress.style.width = `${((currentIndex + 1) / currentList.length) * 100}%`;
+            nextBtn.innerText = (currentIndex === currentList.length - 1) ? (currentRound === 3 ? "完了" : "次ラウンドへ") : "次へ";
+            
+            startSpeechRecognition();
+        }
+
+        function startSpeechRecognition() {
+            if (recognition && isRecording) {
+                try {
+                    recognition.stop();
+                    setTimeout(() => { try { recognition.start(); } catch(e){} }, 150);
+                } catch(e) { try { recognition.start(); } catch(err){} }
+            }
+        }
+
+        function goToNextCard() {
+            if (autoAdvanceTimeout) { clearTimeout(autoAdvanceTimeout); autoAdvanceTimeout = null; }
+
+            if (currentIndex < currentList.length - 1) { currentIndex++; updateCard(); } 
+            else if (currentRound < 3) { 
+                currentRound++; currentIndex = 0; 
+                currentList = [...wordData].sort(() => Math.random() - 0.5); 
+                updateCard(); 
+            } 
+            else { 
+                finishScreen.classList.remove('hidden');
+                document.getElementById('score-display').innerText = `正解数: ${totalCorrect} / ${wordData.length * 3}`;
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+            }
+        }
+
+        startRecBtn.addEventListener('click', initRecording);
+        nextBtn.addEventListener('click', goToNextCard);
+        speechBtn.addEventListener('click', startSpeechRecognition);
+        
+        saveLogBtn.addEventListener('click', () => {
+            const promptHeader = "以下の日本語練習ログと録音ファイルを解析してください。発音の正確性、認識された単語の癖、改善のためのアドバイスを日本語でお願いします。\n\n--- 練習ログ ---\n";
+            
+            const logContent = sessionLogs.map(log => {
+                return `ラウンド${log.round}: 【${log.word}】 (${log.reading}) \n判定: ${log.status} \n認識結果: ${log.transcript}`;
+            }).join('\n\n');
+
+            const fullLog = promptHeader + logContent;
+            const blob = new Blob([fullLog], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `practice_log_${new Date().getTime()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            saveLogBtn.innerText = "✅ ログの保存完了！";
+            setTimeout(() => saveLogBtn.innerText = "📄 練習ログを保存 (Gemini用)", 2000);
+        });
+
+        window.onload = () => {
+            cardDisplay.innerHTML = `<p class="text-slate-400">マイクを許可して開始してください</p>`;
+        };
+    </script>
+</body>
+</html>
